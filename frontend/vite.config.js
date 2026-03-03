@@ -6,11 +6,11 @@ export default defineConfig({
   plugins: [react()],
   server: {
     proxy: {
-      '/api': {
-        target: 'http://localhost:8080',
-        changeOrigin: true,
-        secure: false,
-      }
+      '/api': 'http://localhost:8080' // Essa é a ponte mágica que eu tinha apagado!
     }
+  },
+  test: {
+    globals: true,
+    environment: 'jsdom',
   }
 })
