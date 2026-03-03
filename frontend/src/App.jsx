@@ -11,17 +11,17 @@ function App() {
   const [prodCode, setProdCode] = useState(''); const [prodName, setProdName] = useState(''); const [prodValue, setProdValue] = useState('')
   const [rmCode, setRmCode] = useState(''); const [rmName, setRmName] = useState(''); const [rmStock, setRmStock] = useState('')
 
-  // --- ESTADOS: RECEITA DO PRODUTO ---
+  // --- ESTADOS: RECEITA DO PRODUTO E PRODUÇÃO MÁXIMA ---
   const [selectedProduct, setSelectedProduct] = useState(null)
   const [recipe, setRecipe] = useState([])
   const [selectedRmId, setSelectedRmId] = useState('')
   const [requiredQuantity, setRequiredQuantity] = useState('')
+  const [maxProduction, setMaxProduction] = useState(null) // Novo estado para o resultado mágico!
 
   // --- FUNÇÕES DE BUSCA ---
   const fetchProducts = () => fetch('/api/products').then(res => res.json()).then(data => setProducts(data)).catch(err => console.error(err))
   const fetchRawMaterials = () => fetch('/api/raw-materials').then(res => res.json()).then(data => setRawMaterials(data)).catch(err => console.error(err))
 
-  // Busca tudo logo que a tela carrega
   useEffect(() => {
     fetchProducts()
     fetchRawMaterials()
@@ -40,9 +40,10 @@ function App() {
       .then(res => { if (res.ok) { setRmCode(''); setRmName(''); setRmStock(''); fetchRawMaterials(); } else alert('Erro!') })
   }
 
-  // --- FUNÇÕES DA RECEITA ---
+  // --- FUNÇÕES DA RECEITA E ALGORITMO ---
   const openRecipe = (product) => {
     setSelectedProduct(product)
+    setMaxProduction(null) // Limpa o cálculo anterior
     fetchRecipe(product.id)
   }
 
@@ -68,11 +69,19 @@ function App() {
       body: JSON.stringify(payload)
     }).then(res => {
       if (res.ok) {
-        setSelectedRmId(''); setRequiredQuantity(''); fetchRecipe(selectedProduct.id);
+        setSelectedRmId(''); setRequiredQuantity(''); fetchRecipe(selectedProduct.id); setMaxProduction(null);
       } else {
         alert('Erro ao adicionar à receita.')
       }
     })
+  }
+
+  // A MÁGICA ACONTECE AQUI: Chama o nosso endpoint do Algoritmo
+  const calculateMaxProduction = () => {
+    fetch(`/api/products/${selectedProduct.id}/max-production`)
+      .then(res => res.json())
+      .then(data => setMaxProduction(data.maxProduction))
+      .catch(err => console.error(err))
   }
 
   // --- ESTILOS COMPARTILHADOS ---
@@ -85,7 +94,6 @@ function App() {
     <div style={{ padding: '30px', fontFamily: 'Arial, sans-serif' }}>
       <h1>🏭 Autoflex - Gestão de Fábrica</h1>
       
-      {/* MENU SÓ APARECE SE NÃO ESTIVERMOS VENDO UMA RECEITA */}
       {!selectedProduct && (
         <div style={{ marginBottom: '30px' }}>
           <button style={tabBtnStyle(activeTab === 'products')} onClick={() => setActiveTab('products')}>📦 Produtos</button>
@@ -122,7 +130,7 @@ function App() {
         </div>
       )}
 
-      {/* TELA DA RECEITA (COMPOSIÇÃO DO PRODUTO) */}
+      {/* TELA DA RECEITA E CÁLCULO MÁXIMO */}
       {activeTab === 'products' && selectedProduct && (
         <div>
           <button onClick={() => setSelectedProduct(null)} style={{ marginBottom: '20px', padding: '8px 15px', cursor: 'pointer', backgroundColor: '#666', color: '#fff', border: 'none', borderRadius: '4px' }}>
@@ -151,7 +159,7 @@ function App() {
             </form>
           </div>
 
-          <table border="1" cellPadding="12" style={{ borderCollapse: 'collapse', width: '100%', textAlign: 'left' }}>
+          <table border="1" cellPadding="12" style={{ borderCollapse: 'collapse', width: '100%', textAlign: 'left', marginBottom: '30px' }}>
             <thead style={{ backgroundColor: '#f4f4f4', color: '#000' }}>
               <tr><th>Matéria-Prima</th><th>Qtd. Necessária p/ Fabricar 1</th></tr>
             </thead>
@@ -165,13 +173,29 @@ function App() {
                 ))}
             </tbody>
           </table>
+
+          {/* PAINEL DE SUGESTÃO DE PRODUÇÃO */}
+          {recipe.length > 0 && (
+            <div style={{ padding: '20px', backgroundColor: '#333', borderRadius: '8px', textAlign: 'center', border: '2px dashed #FF9800' }}>
+              <button onClick={calculateMaxProduction} style={{ padding: '12px 25px', fontSize: '16px', backgroundColor: '#FF9800', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}>
+                ⚡ Calcular Máximo de Produção
+              </button>
+              
+              {maxProduction !== null && (
+                <div style={{ marginTop: '20px' }}>
+                  <h2 style={{ color: '#FFEB3B', margin: '0' }}>
+                    Com o estoque atual, você pode fabricar: <span style={{ fontSize: '32px' }}>{maxProduction}</span> unidade(s)
+                  </h2>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       )}
 
       {/* TELA DE MATÉRIAS-PRIMAS */}
       {activeTab === 'rawMaterials' && !selectedProduct && (
         <div>
-          {/* O formulário e a tabela de matérias-primas que já fizemos na etapa anterior (mantido igual) */}
           <div style={{ marginBottom: '20px', padding: '20px', backgroundColor: '#2a2a2a', borderRadius: '8px' }}>
             <h3 style={{ marginTop: 0 }}>Cadastrar Nova Matéria-Prima</h3>
             <form onSubmit={handleRmSubmit} style={{ display: 'flex', gap: '15px', alignItems: 'flex-end', flexWrap: 'wrap' }}>
