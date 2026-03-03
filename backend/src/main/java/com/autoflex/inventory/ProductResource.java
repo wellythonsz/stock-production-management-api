@@ -99,4 +99,46 @@ public class ProductResource {
         // O Panache facilita a busca por um campo específico
         return ProductRawMaterial.list("product", product);
     }
+
+    // --- NOVO ENDPOINT: ALGORITMO DE SUGESTÃO DE PRODUÇÃO (ISSUE 7) ---
+
+    @GET
+    @Path("/{id}/max-production")
+    public Response calculateMaxProduction(@PathParam("id") Long productId) {
+        Product product = Product.findById(productId);
+        if (product == null) {
+            throw new WebApplicationException("Product not found.", 404);
+        }
+
+        // 1. Busca a receita inteira do produto
+        List<ProductRawMaterial> recipe = ProductRawMaterial.list("product", product);
+        
+        // Se o produto não tem receita, não podemos fabricar nada
+        if (recipe.isEmpty()) {
+            return Response.ok(new ProductionSuggestion(product.id, product.name, 0)).build();
+        }
+
+        // 2. Define um valor inicial absurdamente alto para irmos reduzindo
+        int maxCanProduce = Integer.MAX_VALUE;
+
+        // 3. O Algoritmo de Gargalo
+        for (ProductRawMaterial item : recipe) {
+            int availableStock = item.rawMaterial.stockQuantity;
+            int required = item.requiredQuantity;
+            
+            // Quantos produtos consigo fazer com ESSA matéria-prima específica?
+            int possibleWithThisMaterial = availableStock / required;
+            
+            // Se essa matéria-prima rende menos que o nosso limite atual, ela vira o novo limite
+            if (possibleWithThisMaterial < maxCanProduce) {
+                maxCanProduce = possibleWithThisMaterial;
+            }
+        }
+
+        // Retorna um objeto bonitinho com o resultado
+        return Response.ok(new ProductionSuggestion(product.id, product.name, maxCanProduce)).build();
+    }
+
+    // Usamos um 'Record' (recurso moderno do Java) para criar a estrutura do JSON de resposta rapidamente
+    public record ProductionSuggestion(Long productId, String productName, int maxProduction) {}
 }
