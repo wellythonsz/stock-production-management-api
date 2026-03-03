@@ -1,206 +1,339 @@
 import React, { useEffect, useState } from 'react'
 import './App.css'
+import LoginScreen from './LoginScreen'
 
 function App() {
-  // --- ESTADOS DO LOGIN ---
   const [isAuthenticated, setIsAuthenticated] = useState(false)
-  const [username, setUsername] = useState('')
-  const [password, setPassword] = useState('')
-
-  // --- ESTADOS DO SISTEMA ---
-  const [activeTab, setActiveTab] = useState('products')
+  
+  const [activeTab, setActiveTab] = useState('dashboard') 
   const [products, setProducts] = useState([])
   const [rawMaterials, setRawMaterials] = useState([])
+  const [availableProduction, setAvailableProduction] = useState([])
+
   const [prodCode, setProdCode] = useState(''); const [prodName, setProdName] = useState(''); const [prodValue, setProdValue] = useState('')
   const [rmCode, setRmCode] = useState(''); const [rmName, setRmName] = useState(''); const [rmStock, setRmStock] = useState('')
+
   const [selectedProduct, setSelectedProduct] = useState(null)
   const [recipe, setRecipe] = useState([])
   const [selectedRmId, setSelectedRmId] = useState('')
   const [requiredQuantity, setRequiredQuantity] = useState('')
   const [maxProduction, setMaxProduction] = useState(null)
 
-  // --- FUNÇÃO DE LOGIN ---
-  const handleLogin = (e) => {
-    e.preventDefault()
-    // Mock de autenticação (Apenas para demonstração visual no teste)
-    if (username === 'admin' && password === 'autoflex') {
+  const handleLogin = (user, pass) => {
+    if (user === 'admin' && pass === 'autoflex') {
       setIsAuthenticated(true)
     } else {
-      alert('Credenciais inválidas! Dica: usuário "admin" e senha "autoflex"')
+      alert('Incorrect username or password! (Hint: admin / autoflex)')
     }
   }
 
-  // --- FUNÇÕES DE BUSCA ---
   const fetchProducts = () => fetch('/api/products').then(res => res.json()).then(data => setProducts(data)).catch(err => console.error(err))
   const fetchRawMaterials = () => fetch('/api/raw-materials').then(res => res.json()).then(data => setRawMaterials(data)).catch(err => console.error(err))
-
-  // Só busca os dados SE estiver logado
+  
+  const fetchAvailableProduction = () => {
+    fetch('/api/products/available-production')
+      .then(res => res.ok ? res.json() : []) // <-- A mágica da proteção está nesta linha!
+      .then(data => setAvailableProduction(data))
+      .catch(err => console.error("Erro na produção disponível:", err))
+  }
   useEffect(() => {
-    if (isAuthenticated) {
-      fetchProducts()
-      fetchRawMaterials()
+    if (isAuthenticated) { 
+      fetchProducts(); 
+      fetchRawMaterials(); 
+      fetchAvailableProduction(); 
     }
   }, [isAuthenticated])
 
-  // --- FUNÇÕES DO ERP ---
-  const handleProductSubmit = (e) => {
-    e.preventDefault()
-    fetch('/api/products', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code: prodCode, name: prodName, value: parseFloat(prodValue) }) })
-      .then(res => { if (res.ok) { setProdCode(''); setProdName(''); setProdValue(''); fetchProducts(); } else alert('Erro!') })
+  const handleProductSubmit = (e) => { 
+    e.preventDefault(); 
+    fetch('/api/products', { 
+      method: 'POST', 
+      headers: { 'Content-Type': 'application/json' }, 
+      body: JSON.stringify({ code: prodCode, name: prodName, value: parseFloat(prodValue) }) 
+    }).then(res => { 
+      if (res.ok) { 
+        setProdCode(''); setProdName(''); setProdValue(''); 
+        fetchProducts(); fetchAvailableProduction(); 
+      } 
+    }) 
   }
 
-  const handleRmSubmit = (e) => {
-    e.preventDefault()
-    fetch('/api/raw-materials', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code: rmCode, name: rmName, stockQuantity: parseInt(rmStock) }) })
-      .then(res => { if (res.ok) { setRmCode(''); setRmName(''); setRmStock(''); fetchRawMaterials(); } else alert('Erro!') })
+  const handleRmSubmit = (e) => { 
+    e.preventDefault(); 
+    fetch('/api/raw-materials', { 
+      method: 'POST', 
+      headers: { 'Content-Type': 'application/json' }, 
+      body: JSON.stringify({ code: rmCode, name: rmName, stockQuantity: parseInt(rmStock) }) 
+    }).then(res => { 
+      if (res.ok) { 
+        setRmCode(''); setRmName(''); setRmStock(''); 
+        fetchRawMaterials(); fetchAvailableProduction(); 
+      } 
+    }) 
   }
 
-  const openRecipe = (product) => { setSelectedProduct(product); setMaxProduction(null); fetchRecipe(product.id) }
-  const fetchRecipe = (productId) => fetch(`/api/products/${productId}/raw-materials`).then(res => res.json()).then(data => setRecipe(data)).catch(err => console.error(err))
+  const openRecipe = (product) => { 
+    setSelectedProduct(product); 
+    setMaxProduction(null); 
+    fetchRecipe(product.id);
+  }
+
+  const fetchRecipe = (productId) => {
+    fetch(`/api/products/${productId}/raw-materials`)
+      .then(res => res.ok ? res.json() : [])
+      .then(data => {
+        if (Array.isArray(data)) setRecipe(data)
+        else setRecipe([])
+      })
+      .catch(err => console.error("Error fetching recipe:", err))
+  }
 
   const handleAddMaterialToRecipe = (e) => {
     e.preventDefault()
-    if (!selectedRmId) return alert('Selecione uma matéria-prima!')
-    fetch(`/api/products/${selectedProduct.id}/raw-materials`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ rawMaterial: { id: parseInt(selectedRmId) }, requiredQuantity: parseInt(requiredQuantity) })
-    }).then(res => { if (res.ok) { setSelectedRmId(''); setRequiredQuantity(''); fetchRecipe(selectedProduct.id); setMaxProduction(null); } else { alert('Erro ao adicionar à receita.') } })
+    
+    const payload = {
+      rawMaterialId: parseInt(selectedRmId),
+      requiredQuantity: parseInt(requiredQuantity)
+    };
+
+    fetch(`/api/products/${selectedProduct.id}/raw-materials`, { 
+      method: 'POST', 
+      headers: { 'Content-Type': 'application/json' }, 
+      body: JSON.stringify(payload) 
+    })
+    .then(res => { 
+      if (res.ok) { 
+        setSelectedRmId(''); 
+        setRequiredQuantity(''); 
+        fetchRecipe(selectedProduct.id); 
+        setMaxProduction(null); 
+        fetchAvailableProduction(); 
+      } else {
+        res.text().then(text => alert("Error adding material: " + text))
+      } 
+    })
+    .catch(err => alert("Connection error: " + err))
   }
 
-  const calculateMaxProduction = () => fetch(`/api/products/${selectedProduct.id}/max-production`).then(res => res.json()).then(data => setMaxProduction(data.maxProduction)).catch(err => console.error(err))
+  const calculateMaxProduction = () => {
+    fetch(`/api/products/${selectedProduct.id}/max-production`)
+      .then(res => res.json())
+      .then(data => setMaxProduction(data.maxProduction))
+      .catch(err => console.error(err))
+  }
 
-  // ==========================================
-  // RENDERIZAÇÃO CONDICIONAL (A MÁGICA ACONTECE AQUI)
-  // ==========================================
-  
-  // SE NÃO ESTIVER LOGADO, MOSTRA A TELA DE LOGIN
   if (!isAuthenticated) {
-    return (
-      <div className="login-page">
-        <div className="login-card">
-          <div className="login-logo">🏭</div>
-          <h2>Autoflex ERP</h2>
-          <form onSubmit={handleLogin} className="login-form">
-            <input type="text" placeholder="Usuário" className="login-input" value={username} onChange={e => setUsername(e.target.value)} required />
-            <input type="password" placeholder="Senha" className="login-input" value={password} onChange={e => setPassword(e.target.value)} required />
-            <button type="submit" className="login-btn">Entrar no Sistema</button>
-          </form>
-          <p className="login-hint">Acesso restrito para funcionários Autoflex.</p>
-        </div>
-      </div>
-    )
+    return <LoginScreen onLogin={handleLogin} />
   }
 
-  // SE ESTIVER LOGADO, MOSTRA O SISTEMA INTEIRO
+  const getPageTitle = () => {
+    if (selectedProduct) return `Recipe: ${selectedProduct.name}`
+    if (activeTab === 'dashboard') return 'Dashboard'
+    if (activeTab === 'products') return 'Manage Products'
+    if (activeTab === 'rawMaterials') return 'Manage Raw Materials'
+  }
+
   return (
-    <div className="app-container">
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <h1 className="header-title">🏭 Autoflex ERP</h1>
-        <button onClick={() => setIsAuthenticated(false)} className="btn-back">Sair (Logout)</button>
-      </div>
+    <div className="admin-layout">
       
-      {!selectedProduct && (
-        <div className="tabs-container">
-          <button className={`tab-btn ${activeTab === 'products' ? 'active' : ''}`} onClick={() => setActiveTab('products')}>📦 Produtos</button>
-          <button className={`tab-btn ${activeTab === 'rawMaterials' ? 'active' : ''}`} onClick={() => setActiveTab('rawMaterials')}>🛢️ Matérias-Primas</button>
+      <aside className="sidebar">
+        <div className="sidebar-header">
+          Inventory MS
         </div>
-      )}
-
-      {/* TELA PRODUTOS */}
-      {activeTab === 'products' && !selectedProduct && (
-        <div>
-          <div className="card">
-            <h3>Cadastrar Novo Produto</h3>
-            <form onSubmit={handleProductSubmit} className="form-group">
-              <div className="input-wrapper"><label>Código</label><input type="text" className="input-field" value={prodCode} onChange={e => setProdCode(e.target.value)} required /></div>
-              <div className="input-wrapper"><label>Nome</label><input type="text" className="input-field" value={prodName} onChange={e => setProdName(e.target.value)} required /></div>
-              <div className="input-wrapper"><label>Valor (R$)</label><input type="number" step="0.01" className="input-field" value={prodValue} onChange={e => setProdValue(e.target.value)} required /></div>
-              <button type="submit" className="btn-primary">Salvar Produto</button>
-            </form>
-          </div>
-
-          <table className="data-table">
-            <thead><tr><th>ID</th><th>Código</th><th>Nome</th><th>Valor (R$)</th><th>Ações</th></tr></thead>
-            <tbody>
-              {products.map(p => (
-                <tr key={p.id}>
-                  <td>{p.id}</td><td>{p.code}</td><td>{p.name}</td><td>R$ {p.value.toFixed(2)}</td>
-                  <td><button onClick={() => openRecipe(p)} className="btn-secondary">⚙️ Ver Receita</button></td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-
-      {/* TELA DA RECEITA */}
-      {activeTab === 'products' && selectedProduct && (
-        <div>
-          <button onClick={() => setSelectedProduct(null)} className="btn-back">⬅ Voltar para Produtos</button>
+        <ul className="sidebar-menu">
+          <li className={activeTab === 'dashboard' && !selectedProduct ? 'active' : ''} onClick={() => { setActiveTab('dashboard'); setSelectedProduct(null); }}>
+            <i className="fas fa-home"></i> Dashboard
+          </li>
+          <li className={activeTab === 'products' ? 'active' : ''} onClick={() => { setActiveTab('products'); setSelectedProduct(null); }}>
+            <i className="fas fa-box"></i> Products
+          </li>
+          <li className={activeTab === 'rawMaterials' && !selectedProduct ? 'active' : ''} onClick={() => { setActiveTab('rawMaterials'); setSelectedProduct(null); }}>
+            <i className="fas fa-boxes"></i> Categories (Raw Materials)
+          </li>
           
-          <h2 style={{ color: 'var(--primary-color)', marginBottom: '20px' }}>Composição: {selectedProduct.name}</h2>
+          <li style={{ marginTop: 'auto', borderTop: '1px solid #2c3b41' }} onClick={() => setIsAuthenticated(false)}>
+            <i className="fas fa-sign-out-alt"></i> Logout
+          </li>
+        </ul>
+      </aside>
+
+      <main className="main-wrapper">
+        <header className="top-header">
+          {getPageTitle()}
+        </header>
+
+        <div className="content-area">
           
-          <div className="card">
-            <h3>Adicionar Ingrediente</h3>
-            <form onSubmit={handleAddMaterialToRecipe} className="form-group">
-              <div className="input-wrapper">
-                <label>Matéria-Prima</label>
-                <select className="input-field" value={selectedRmId} onChange={e => setSelectedRmId(e.target.value)} required>
-                  <option value="">Selecione na lista...</option>
-                  {rawMaterials.map(rm => <option key={rm.id} value={rm.id}>{rm.name} (Estoque: {rm.stockQuantity})</option>)}
-                </select>
+          {/* SCREEN: DASHBOARD */}
+          {activeTab === 'dashboard' && !selectedProduct && (
+            <div>
+              <div className="dashboard-cards">
+                <div className="stat-card bg-blue">
+                  <h4>Total Products</h4>
+                  <p>{products.length}</p>
+                </div>
+                <div className="stat-card bg-green">
+                  <h4>Total Stock</h4>
+                  <p>{rawMaterials.reduce((acc, rm) => acc + rm.stockQuantity, 0)}</p>
+                </div>
+                <div className="stat-card bg-yellow">
+                  <h4>Orders Today</h4>
+                  <p>12</p> 
+                </div>
+                <div className="stat-card bg-purple">
+                  <h4>Revenue (Estimated)</h4>
+                  <p>${products.reduce((acc, p) => acc + p.value, 0).toFixed(2)}</p>
+                </div>
               </div>
-              <div className="input-wrapper">
-                <label>Qtd. p/ Fabricar 1 unidade</label>
-                <input type="number" className="input-field" value={requiredQuantity} onChange={e => setRequiredQuantity(e.target.value)} required min="1" />
+
+              <div className="card">
+                <h3><i className="fas fa-industry" style={{color: 'var(--cobre)', marginRight: '10px'}}></i> Available Production Analysis</h3>
+                <p style={{color: 'var(--cinza-aco)', marginBottom: '20px'}}>
+                  Consult the maximum quantity of each product that can be manufactured based on the current raw material stock.
+                </p>
+                
+                {availableProduction.length === 0 ? (
+                  <p style={{textAlign: 'center', padding: '20px', color: 'var(--cinza-aco)'}}>
+                    <em>No product recipes found. Add raw materials to a product recipe to see the analysis.</em>
+                  </p>
+                ) : (
+                  <table className="data-table">
+                    <thead>
+                      <tr>
+                        <th>Product</th>
+                        <th>Production Capacity</th>
+                        <th>Status</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {availableProduction.map(item => (
+                        <tr key={item.productId}>
+                          <td><strong>{item.productName}</strong></td>
+                          <td style={{fontSize: '1.2rem', color: 'var(--azul-petroleo)', fontWeight: 'bold'}}>{item.maxProduction} units</td>
+                          <td>
+                            {item.maxProduction > 0 
+                              ? <span style={{color: '#2e7d32', backgroundColor: '#e8f5e9', padding: '5px 12px', borderRadius: '20px', fontSize: '0.85rem', fontWeight: 'bold'}}>🟢 Ready to Manufacture</span>
+                              : <span style={{color: '#c62828', backgroundColor: '#ffebee', padding: '5px 12px', borderRadius: '20px', fontSize: '0.85rem', fontWeight: 'bold'}}>🔴 Missing Materials</span>}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
               </div>
-              <button type="submit" className="btn-secondary">+ Adicionar Ingrediente</button>
-            </form>
-          </div>
+            </div>
+          )}
 
-          <table className="data-table">
-            <thead><tr><th>Matéria-Prima</th><th>Qtd. Necessária</th></tr></thead>
-            <tbody>
-              {recipe.length === 0 ? <tr><td colSpan="2" style={{ textAlign: 'center', padding: '30px', color: '#666' }}>A receita está vazia. Adicione insumos acima.</td></tr> :
-                recipe.map(item => (
-                  <tr key={item.id}><td>{item.rawMaterial.name} ({item.rawMaterial.code})</td><td>{item.requiredQuantity} un</td></tr>
-                ))}
-            </tbody>
-          </table>
+          {/* SCREEN: PRODUCTS */}
+          {activeTab === 'products' && !selectedProduct && (
+              <div className="centered-content"> 
+              <div className="card">
+                <h3>New Product</h3>
+                <form onSubmit={handleProductSubmit} className="form-group">
+                  <div className="input-wrapper"><label>Code</label><input type="text" className="input-field" value={prodCode} onChange={e => setProdCode(e.target.value)} required /></div>
+                  <div className="input-wrapper"><label>Name</label><input type="text" className="input-field" value={prodName} onChange={e => setProdName(e.target.value)} required /></div>
+                  <div className="input-wrapper"><label>Value ($)</label><input type="number" step="0.01" className="input-field" value={prodValue} onChange={e => setProdValue(e.target.value)} required /></div>
+                  <div className="form-actions">
+                  <button type="submit" className="btn-primary">Save</button>
+                  </div>
+                </form>
+              </div>
 
-          {recipe.length > 0 && (
-            <div className="result-panel">
-              <button onClick={calculateMaxProduction} className="btn-calculate">⚡ Calcular Máximo de Produção</button>
-              {maxProduction !== null && (
-                <div className="result-text">
-                  Com o estoque atual, você pode fabricar:
-                  <span className="result-number">{maxProduction} un</span>
+              <table className="data-table">
+                <thead><tr><th>ID</th><th>Code</th><th>Name</th><th>Value</th><th>Actions</th></tr></thead>
+                <tbody>
+                  {products.map(p => (
+                    <tr key={p.id}>
+                      <td>{p.id}</td><td>{p.code}</td><td>{p.name}</td><td>$ {p.value.toFixed(2)}</td>
+                      <td><button onClick={() => openRecipe(p)} className="btn-secondary"><i className="fas fa-cog"></i> Recipe</button></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {/* SCREEN: PRODUCT RECIPE (ALGORITHM) */}
+          {selectedProduct && (
+            <div className="centered-content">
+              <button onClick={() => setSelectedProduct(null)} className="btn-back">
+                <i className="fas fa-arrow-left"></i> Back to Products
+              </button>
+              
+              <div className="card">
+                <h3>Add Raw Material to Recipe</h3>
+                <form onSubmit={handleAddMaterialToRecipe} className="form-group">
+                  <div className="input-wrapper">
+                    <label>Raw Material</label>
+                    <select className="input-field" value={selectedRmId} onChange={e => setSelectedRmId(e.target.value)} required>
+                      <option value="">Select...</option>
+                      {rawMaterials.map(rm => <option key={rm.id} value={rm.id}>{rm.name} (Stock: {rm.stockQuantity})</option>)}
+                    </select>
+                  </div>
+                  <div className="input-wrapper">
+                    <label>Required Quantity</label>
+                    <input type="number" className="input-field" value={requiredQuantity} onChange={e => setRequiredQuantity(e.target.value)} required min="1" />
+                  </div>
+                  <button type="submit" className="btn-primary">Add</button>
+                </form>
+              </div>
+
+              <table className="data-table">
+                <thead><tr><th>Raw Material</th><th>Required Qty</th></tr></thead>
+                <tbody>
+                  {recipe.map(item => (
+                    <tr key={item.id}>
+                      <td>{item.rawMaterialName} ({item.rawMaterialCode})</td>
+                      <td>{item.requiredQuantity} units</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+
+              {recipe.length > 0 && (
+                <div className="result-panel">
+                  <button onClick={calculateMaxProduction} className="btn-calculate">
+                    <i className="fas fa-bolt" style={{marginRight: '8px'}}></i> Analyze Production Bottleneck
+                  </button>
+                  
+                  {maxProduction !== null && (
+                    <div className="result-content">
+                      <span className="result-label">Estimated Maximum Production</span>
+                      <div className="result-number">
+                        {maxProduction} <span className="result-unit">units</span>
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
             </div>
           )}
-        </div>
-      )}
 
-      {/* TELA MATÉRIAS-PRIMAS */}
-      {activeTab === 'rawMaterials' && !selectedProduct && (
-        <div>
-          <div className="card">
-            <h3>Cadastrar Insumo</h3>
-            <form onSubmit={handleRmSubmit} className="form-group">
-              <div className="input-wrapper"><label>Código</label><input type="text" className="input-field" value={rmCode} onChange={e => setRmCode(e.target.value)} required /></div>
-              <div className="input-wrapper"><label>Nome</label><input type="text" className="input-field" value={rmName} onChange={e => setRmName(e.target.value)} required /></div>
-              <div className="input-wrapper"><label>Estoque Atual</label><input type="number" className="input-field" value={rmStock} onChange={e => setRmStock(e.target.value)} required min="0" /></div>
-              <button type="submit" className="btn-primary">Salvar Insumo</button>
-            </form>
-          </div>
-          <table className="data-table">
-            <thead><tr><th>ID</th><th>Código</th><th>Nome</th><th>Qtd. Estoque</th></tr></thead>
-            <tbody>
-              {rawMaterials.map(rm => <tr key={rm.id}><td>{rm.id}</td><td>{rm.code}</td><td>{rm.name}</td><td>{rm.stockQuantity} un</td></tr>)}
-            </tbody>
-          </table>
+          {/* SCREEN: RAW MATERIALS */}
+          {activeTab === 'rawMaterials' && !selectedProduct && (
+            <div className="centered-content">
+              <div className="card">
+                <h3>New Raw Material</h3>
+                <form onSubmit={handleRmSubmit} className="form-group">
+                  <div className="input-wrapper"><label>Code</label><input type="text" className="input-field" value={rmCode} onChange={e => setRmCode(e.target.value)} required /></div>
+                  <div className="input-wrapper"><label>Name</label><input type="text" className="input-field" value={rmName} onChange={e => setRmName(e.target.value)} required /></div>
+                  <div className="input-wrapper"><label>Stock</label><input type="number" className="input-field" value={rmStock} onChange={e => setRmStock(e.target.value)} required min="0" /></div>
+                  <div className="form-actions">
+                  <button type="submit" className="btn-primary">Save</button>
+                  </div>
+                </form>
+              </div>
+              <table className="data-table">
+                <thead><tr><th>ID</th><th>Code</th><th>Name</th><th>Current Stock</th></tr></thead>
+                <tbody>
+                  {rawMaterials.map(rm => <tr key={rm.id}><td>{rm.id}</td><td>{rm.code}</td><td>{rm.name}</td><td>{rm.stockQuantity} units</td></tr>)}
+                </tbody>
+              </table>
+            </div>
+          )}
+
         </div>
-      )}
+      </main>
     </div>
   )
 }

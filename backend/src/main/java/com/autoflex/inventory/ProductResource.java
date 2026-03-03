@@ -4,6 +4,7 @@ import jakarta.transaction.Transactional;
 import jakarta.ws.rs.*;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
+import java.util.ArrayList;
 import java.util.List;
 
 @Path("/api/products")
@@ -11,13 +12,13 @@ import java.util.List;
 @Consumes(MediaType.APPLICATION_JSON)
 public class ProductResource {
 
-    // 1. READ: Lista todos os produtos
+    // --- 1. CRUD BÁSICO DE PRODUTOS ---
+
     @GET
     public List<Product> listAll() {
         return Product.listAll();
     }
 
-    // 2. CREATE: Adiciona um novo produto
     @POST
     @Transactional
     public Response create(Product product) {
@@ -28,7 +29,6 @@ public class ProductResource {
         return Response.status(Response.Status.CREATED).entity(product).build();
     }
 
-    // 3. UPDATE: Atualiza um produto existente
     @PUT
     @Path("/{id}")
     @Transactional
@@ -43,7 +43,6 @@ public class ProductResource {
         return entity;
     }
 
-    // 4. DELETE: Remove um produto
     @DELETE
     @Path("/{id}")
     @Transactional
@@ -56,52 +55,86 @@ public class ProductResource {
         return Response.status(Response.Status.NO_CONTENT).build();
     }
 
-    // --- NOVOS ENDPOINTS: COMPOSIÇÃO DO PRODUTO (RECEITA) ---
+    // --- 2. ENDPOINTS: COMPOSIÇÃO DO PRODUTO (RECEITA) ---
 
-    // 5. Adicionar uma matéria-prima a um produto
+    // DTOs de Segurança para evitar problemas de JSON (Loop do Hibernate)
+    public record AddRecipePayload(Long rawMaterialId, Integer requiredQuantity) {}
+    public record RecipeItemDTO(Long id, String rawMaterialName, String rawMaterialCode, Integer requiredQuantity) {}
+
     @POST
     @Path("/{id}/raw-materials")
     @Transactional
-    public Response addRawMaterialToProduct(@PathParam("id") Long productId, ProductRawMaterial payload) {
+    public Response addRawMaterialToProduct(@PathParam("id") Long productId, AddRecipePayload payload) {
         Product product = Product.findById(productId);
         if (product == null) {
             throw new WebApplicationException("Product not found.", 404);
         }
         
-        // Verifica se a matéria prima existe
-        RawMaterial rm = RawMaterial.findById(payload.rawMaterial.id);
+        if (payload.rawMaterialId() == null) {
+            throw new WebApplicationException("Raw Material ID is required.", 400);
+        }
+
+        RawMaterial rm = RawMaterial.findById(payload.rawMaterialId());
         if (rm == null) {
             throw new WebApplicationException("Raw Material not found.", 404);
         }
         
-        if (payload.requiredQuantity == null || payload.requiredQuantity <= 0) {
+        if (payload.requiredQuantity() == null || payload.requiredQuantity() <= 0) {
             throw new WebApplicationException("Required quantity must be greater than zero.", 400);
         }
 
         ProductRawMaterial association = new ProductRawMaterial();
         association.product = product;
         association.rawMaterial = rm;
-        association.requiredQuantity = payload.requiredQuantity;
+        association.requiredQuantity = payload.requiredQuantity();
         
         association.persist();
 
-        return Response.status(Response.Status.CREATED).entity(association).build();
+        return Response.status(Response.Status.CREATED).build();
     }
 
-    // 6. Listar todas as matérias-primas de um produto
     @GET
     @Path("/{id}/raw-materials")
-    public List<ProductRawMaterial> getProductRawMaterials(@PathParam("id") Long productId) {
+    public Response getProductRawMaterials(@PathParam("id") Long productId) {
         Product product = Product.findById(productId);
         if (product == null) {
             throw new WebApplicationException("Product not found.", 404);
         }
-        // O Panache facilita a busca por um campo específico
-        return ProductRawMaterial.list("product", product);
+        
+        List<ProductRawMaterial> associations = ProductRawMaterial.list("product", product);
+        
+        // Convertendo para o DTO seguro antes de enviar para o React
+        List<RecipeItemDTO> safeRecipeList = new ArrayList<>();
+        for (ProductRawMaterial item : associations) {
+            safeRecipeList.add(new RecipeItemDTO(
+                item.id, 
+                item.rawMaterial.name, 
+                item.rawMaterial.code, 
+                item.requiredQuantity
+            ));
+        }
+        
+        return Response.ok(safeRecipeList).build();
     }
 
-    // --- NOVO ENDPOINT: ALGORITMO DE SUGESTÃO DE PRODUÇÃO (ISSUE 7) ---
+    // --- 3. ALGORITMOS DE PRODUÇÃO (CUMPRINDO RF004) ---
 
+    // Consulta geral de produção disponível para todos os produtos (Dashboard)
+    @GET
+    @Path("/available-production")
+    public Response getAvailableProduction() {
+        List<Product> products = Product.listAll();
+        List<ProductionSuggestion> resultList = new ArrayList<>();
+
+        for (Product p : products) {
+            int maxProd = calculateMaxProductionForProduct(p);
+            resultList.add(new ProductionSuggestion(p.id, p.name, maxProd));
+        }
+
+        return Response.ok(resultList).build();
+    }
+
+    // Consulta de gargalo de um produto específico (Tela da Receita)
     @GET
     @Path("/{id}/max-production")
     public Response calculateMaxProduction(@PathParam("id") Long productId) {
@@ -110,35 +143,35 @@ public class ProductResource {
             throw new WebApplicationException("Product not found.", 404);
         }
 
-        // 1. Busca a receita inteira do produto
+        int maxCanProduce = calculateMaxProductionForProduct(product);
+        return Response.ok(new ProductionSuggestion(product.id, product.name, maxCanProduce)).build();
+    }
+
+    // --- MÉTODO AUXILIAR: O CÉREBRO MATEMÁTICO ---
+    
+    private int calculateMaxProductionForProduct(Product product) {
         List<ProductRawMaterial> recipe = ProductRawMaterial.list("product", product);
         
-        // Se o produto não tem receita, não podemos fabricar nada
         if (recipe.isEmpty()) {
-            return Response.ok(new ProductionSuggestion(product.id, product.name, 0)).build();
+            return 0; // Se não tem receita, não fabrica nada
         }
 
-        // 2. Define um valor inicial absurdamente alto para irmos reduzindo
         int maxCanProduce = Integer.MAX_VALUE;
 
-        // 3. O Algoritmo de Gargalo
         for (ProductRawMaterial item : recipe) {
             int availableStock = item.rawMaterial.stockQuantity;
             int required = item.requiredQuantity;
             
-            // Quantos produtos consigo fazer com ESSA matéria-prima específica?
             int possibleWithThisMaterial = availableStock / required;
             
-            // Se essa matéria-prima rende menos que o nosso limite atual, ela vira o novo limite
             if (possibleWithThisMaterial < maxCanProduce) {
                 maxCanProduce = possibleWithThisMaterial;
             }
         }
-
-        // Retorna um objeto bonitinho com o resultado
-        return Response.ok(new ProductionSuggestion(product.id, product.name, maxCanProduce)).build();
+        
+        return maxCanProduce;
     }
 
-    // Usamos um 'Record' (recurso moderno do Java) para criar a estrutura do JSON de resposta rapidamente
+    // Estrutura do JSON de resposta
     public record ProductionSuggestion(Long productId, String productName, int maxProduction) {}
 }
